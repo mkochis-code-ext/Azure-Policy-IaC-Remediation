@@ -1,0 +1,12 @@
+# Environment Configuration
+environment_prefix = "dev"
+workload          = "AzurePolicyDemo"
+location          = "eastus"
+data_location     = ""  # Defaults to location if not specified
+
+# Tags
+tags = {
+  Project     = "Azure Policy Sample"
+  Owner       = "Platform Team"
+  CostCenter  = "Engineering"
+}

@@ -1,0 +1,267 @@
+name: Terraform CI/CD
+
+parameters:
+  - name: stage
+    displayName: 'Stage'
+    type: string
+    default: 'Dev'
+    values:
+      - Dev
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - terraform/**
+      - .ado/pipelines/main.yml
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - terraform/**
+      - .ado/pipelines/main.yml
+
+variables:
+  - group: terraform-secrets
+  - name: TF_VERSION
+    value: '1.6.0'
+
+stages:
+  # CI - Run on Pull Requests
+  - stage: CI_TerraformPlanDev
+    displayName: 'CI - Terraform Plan (Dev)'
+    condition: eq(variables['Build.Reason'], 'PullRequest')
+    jobs:
+      - job: TerraformPlan
+        displayName: 'Terraform Plan (Dev)'
+        pool:
+          vmImage: ubuntu-latest
+        variables:
+          TF_VAR_location: $(DEV_LOCATION)
+        steps:
+          - checkout: self
+
+          - task: Docker@1
+            displayName: 'Terraform Format Check'
+            name: fmt
+            continueOnError: true
+            inputs:
+              command: 'Run an image'
+              imageName: 'hashicorp/terraform:$(TF_VERSION)'
+              qualifyImageName: false
+              volumes: '$(Build.SourcesDirectory):/workspace'
+              workingDirectory: '/workspace/terraform/environments/dev'
+              containerCommand: 'fmt -check -recursive'
+              runInBackground: false
+
+          - task: Docker@1
+            displayName: 'Terraform Init'
+            name: init
+            inputs:
+              command: 'Run an image'
+              imageName: 'hashicorp/terraform:$(TF_VERSION)'
+              qualifyImageName: false
+              volumes: '$(Build.SourcesDirectory):/workspace'
+              envVars: |
+                ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+                ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+                ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+                ARM_TENANT_ID=$(ARM_TENANT_ID)
+              workingDirectory: '/workspace/terraform/environments/dev'
+              containerCommand: 'init -no-color -backend-config=storage_account_name=$(TF_STATE_STORAGE_ACCOUNT) -backend-config=container_name=tfstate -backend-config=key=dev.terraform.tfstate -backend-config=resource_group_name=$(TF_STATE_RESOURCE_GROUP) -backend-config=use_azuread_auth=true'
+              runInBackground: false
+
+          - task: Docker@1
+            displayName: 'Terraform Validate'
+            name: validate
+            inputs:
+              command: 'Run an image'
+              imageName: 'hashicorp/terraform:$(TF_VERSION)'
+              qualifyImageName: false
+              volumes: '$(Build.SourcesDirectory):/workspace'
+              workingDirectory: '/workspace/terraform/environments/dev'
+              containerCommand: 'validate -no-color'
+              runInBackground: false
+
+          - task: Docker@1
+            displayName: 'Terraform Plan'
+            name: plan
+            continueOnError: true
+            inputs:
+              command: 'Run an image'
+              imageName: 'hashicorp/terraform:$(TF_VERSION)'
+              qualifyImageName: false
+              volumes: '$(Build.SourcesDirectory):/workspace'
+              envVars: |
+                TF_VAR_location=$(TF_VAR_location)
+                ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+                ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+                ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+                ARM_TENANT_ID=$(ARM_TENANT_ID)
+              workingDirectory: '/workspace/terraform/environments/dev'
+              containerCommand: 'plan -no-color -input=false'
+              runInBackground: false
+
+          - script: |
+              FMT_OUTCOME=$([ "$(fmt.result)" = "Succeeded" ] && echo "success" || echo "failure")
+              INIT_OUTCOME=$([ "$(init.result)" = "Succeeded" ] && echo "success" || echo "failure")
+              VALIDATE_OUTCOME=$([ "$(validate.result)" = "Succeeded" ] && echo "success" || echo "failure")
+              PLAN_OUTCOME=$([ "$(plan.result)" = "Succeeded" ] && echo "success" || echo "failure")
+
+              BODY=$(cat <<COMMENT
+              #### Terraform Format and Style \`${FMT_OUTCOME}\`
+              #### Terraform Initialization \`${INIT_OUTCOME}\`
+              #### Terraform Validation \`${VALIDATE_OUTCOME}\`
+              #### Terraform Plan \`${PLAN_OUTCOME}\`
+
+              *Queued by: $(Build.RequestedFor), Trigger: $(Build.Reason)*
+              COMMENT
+              )
+
+              curl -s -u ":$(System.AccessToken)" \
+                -X POST \
+                -H "Content-Type: application/json" \
+                -d "$(jq -n --arg body "$BODY" '{comments: [{parentCommentId: 0, content: $body, commentType: 1}], status: 1}')" \
+                "$(System.CollectionUri)$(System.TeamProject)/_apis/git/repositories/$(Build.Repository.ID)/pullRequests/$(System.PullRequest.PullRequestId)/threads?api-version=7.1"
+            displayName: 'Comment PR with Plan'
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - script: |
+              if [ "$(plan.result)" = "Failed" ]; then
+                echo "Terraform Plan failed. Exiting."
+                exit 1
+              fi
+            displayName: 'Terraform Plan Status Check'
+
+  # CD - Deploy to Dev
+  - stage: CD_TerraformDeployDev
+    displayName: 'CD - Deploy to Dev'
+    condition: |
+      and(
+        eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+        eq('${{ parameters.stage }}', 'Dev')
+      )
+    jobs:
+      - job: TerraformPlan
+        displayName: 'Terraform Plan (Dev)'
+        pool:
+          vmImage: ubuntu-latest
+        variables:
+          TF_VAR_location: $(DEV_LOCATION)
+        steps:
+          - checkout: self
+
+          - task: Docker@1
+            displayName: 'Terraform Init'
+            inputs:
+              command: 'Run an image'
+              imageName: 'hashicorp/terraform:$(TF_VERSION)'
+              qualifyImageName: false
+              volumes: '$(Build.SourcesDirectory):/workspace'
+              envVars: |
+                ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+                ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+                ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+                ARM_TENANT_ID=$(ARM_TENANT_ID)
+              workingDirectory: '/workspace/terraform/environments/dev'
+              containerCommand: 'init -no-color -backend-config=storage_account_name=$(TF_STATE_STORAGE_ACCOUNT) -backend-config=container_name=tfstate -backend-config=key=dev.terraform.tfstate -backend-config=resource_group_name=$(TF_STATE_RESOURCE_GROUP) -backend-config=use_azuread_auth=true'
+              runInBackground: false
+
+          - task: Docker@1
+            displayName: 'Terraform Plan'
+            inputs:
+              command: 'Run an image'
+              imageName: 'hashicorp/terraform:$(TF_VERSION)'
+              qualifyImageName: false
+              volumes: '$(Build.SourcesDirectory):/workspace'
+              envVars: |
+                TF_VAR_location=$(TF_VAR_location)
+                ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+                ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+                ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+                ARM_TENANT_ID=$(ARM_TENANT_ID)
+              workingDirectory: '/workspace/terraform/environments/dev'
+              containerCommand: 'plan -no-color -input=false'
+              runInBackground: false
+
+      - job: WaitForApproval
+        displayName: 'Wait for Approval'
+        dependsOn: TerraformPlan
+        pool: server
+        steps:
+          - task: ManualValidation@0
+            displayName: 'Approve Terraform Apply'
+            inputs:
+              notifyUsers: ''
+              instructions: 'Review the Terraform Plan output above and approve to proceed with Apply to Dev.'
+              onTimeout: reject
+
+      - deployment: TerraformApply
+        displayName: 'Terraform Apply (Dev)'
+        dependsOn: WaitForApproval
+        pool:
+          vmImage: ubuntu-latest
+        environment: dev
+        variables:
+          TF_VAR_location: $(DEV_LOCATION)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: Docker@1
+                  displayName: 'Terraform Init'
+                  inputs:
+                    command: 'Run an image'
+                    imageName: 'hashicorp/terraform:$(TF_VERSION)'
+                    qualifyImageName: false
+                    volumes: '$(Build.SourcesDirectory):/workspace'
+                    envVars: |
+                      ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+                      ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+                      ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+                      ARM_TENANT_ID=$(ARM_TENANT_ID)
+                    workingDirectory: '/workspace/terraform/environments/dev'
+                    containerCommand: 'init -no-color -backend-config=storage_account_name=$(TF_STATE_STORAGE_ACCOUNT) -backend-config=container_name=tfstate -backend-config=key=dev.terraform.tfstate -backend-config=resource_group_name=$(TF_STATE_RESOURCE_GROUP) -backend-config=use_azuread_auth=true'
+                    runInBackground: false
+
+                - task: Docker@1
+                  displayName: 'Terraform Apply'
+                  inputs:
+                    command: 'Run an image'
+                    imageName: 'hashicorp/terraform:$(TF_VERSION)'
+                    qualifyImageName: false
+                    volumes: '$(Build.SourcesDirectory):/workspace'
+                    envVars: |
+                      TF_VAR_location=$(TF_VAR_location)
+                      ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+                      ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+                      ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+                      ARM_TENANT_ID=$(ARM_TENANT_ID)
+                    workingDirectory: '/workspace/terraform/environments/dev'
+                    containerCommand: 'apply -auto-approve -no-color -input=false'
+                    runInBackground: false
+
+                - task: Docker@1
+                  displayName: 'Terraform Output'
+                  inputs:
+                    command: 'Run an image'
+                    imageName: 'hashicorp/terraform:$(TF_VERSION)'
+                    qualifyImageName: false
+                    volumes: '$(Build.SourcesDirectory):/workspace'
+                    envVars: |
+                      ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+                      ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+                      ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+                      ARM_TENANT_ID=$(ARM_TENANT_ID)
+                    workingDirectory: '/workspace/terraform/environments/dev'
+                    containerCommand: 'output -json'
+                    runInBackground: false
+
