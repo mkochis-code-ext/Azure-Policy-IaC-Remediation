@@ -1,48 +1,15 @@
 resource "azurerm_policy_definition" "main" {
   name         = var.policy_name
+  policy_type  = "Custom"
+  mode         = var.mode
   display_name = var.policy_display_name
   description  = var.policy_description
-  policy_type  = "Custom"
-  mode         = "All"
 
-  metadata = jsonencode({
-    category = "Naming"
-  })
+  metadata   = var.metadata
+  parameters = var.parameters
 
-  parameters = jsonencode({
-    maxNameLength = {
-      type = "Integer"
-      metadata = {
-        displayName = "Maximum resource name length"
-        description = "The maximum number of characters allowed in the resource name"
-      }
-    }
-    resourceType = {
-      type = "String"
-      metadata = {
-        displayName = "Resource type"
-        description = "The Azure resource type to enforce the naming rule on"
-      }
-    }
-  })
-
-  policy_rule = jsonencode({
-    if = {
-      allOf = [
-        {
-          field  = "type"
-          equals = "[parameters('resourceType')]"
-        },
-        {
-          value  = "[greater(length(field('name')), parameters('maxNameLength'))]"
-          equals = true
-        }
-      ]
-    }
-    then = {
-      effect = "deny"
-    }
-  })
+  ## Use this structure with external .tftpl files for policy definitions.
+  policy_rule = var.policy_rule
 }
 
 resource "azurerm_resource_group_policy_assignment" "main" {
@@ -53,14 +20,7 @@ resource "azurerm_resource_group_policy_assignment" "main" {
   location             = var.location
   enforce              = !var.enforcement_mode
 
-  parameters = jsonencode({
-    maxNameLength = {
-      value = var.max_name_length
-    }
-    resourceType = {
-      value = var.resource_type
-    }
-  })
+  parameters = var.assignment_parameters
 
   identity {
     type = "SystemAssigned"

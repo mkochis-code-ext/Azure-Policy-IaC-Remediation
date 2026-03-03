@@ -1,0 +1,17 @@
+{
+  "if": {
+    "allOf": [
+      {
+        "field": "type",
+        "equals": "${resource_type}"
+      },
+      {
+        "value": "[greater(length(field('name')), ${max_name_length})]",
+        "equals": true
+      }
+    ]
+  },
+  "then": {
+    "effect": "deny"
+  }
+}

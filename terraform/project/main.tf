@@ -47,8 +47,20 @@ module "storage_name_length_policy" {
   policy_description  = "Denies creation of storage accounts whose name exceeds 10 characters."
   resource_group_id   = module.resource_group.id
   location            = var.location
-  max_name_length     = 10
-  resource_type       = "Microsoft.Storage/storageAccounts"
   enforcement_mode    = var.policy_enforcement_disabled
   tags                = var.tags
+
+  metadata = jsonencode({
+    category = "Naming"
+  })
+
+  ## Use this structure with external .tftpl files for policy definitions.
+  policy_rule = templatefile("${path.module}/../policy_content/storage_name_max_length.tftpl", {
+    resource_type  = "Microsoft.Storage/storageAccounts"
+    max_name_length = 10
+  })
+
+  assignment_parameters = jsonencode({
+    # No assignment-level parameters needed; values are baked into the policy rule via templatefile
+  })
 }

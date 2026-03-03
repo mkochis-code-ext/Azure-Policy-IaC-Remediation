@@ -24,14 +24,33 @@ variable "location" {
   type        = string
 }
 
-variable "max_name_length" {
-  description = "Maximum allowed length for resource names"
-  type        = number
+variable "mode" {
+  description = "The policy mode (e.g., All, Indexed)"
+  type        = string
+  default     = "Indexed"
 }
 
-variable "resource_type" {
-  description = "The Azure resource type to scope the policy to (e.g., Microsoft.Storage/storageAccounts)"
+variable "metadata" {
+  description = "JSON-encoded metadata for the policy definition"
   type        = string
+  default     = null
+}
+
+variable "parameters" {
+  description = "JSON-encoded parameters for the policy definition"
+  type        = string
+  default     = null
+}
+
+variable "policy_rule" {
+  description = "The policy rule content, typically rendered via templatefile() from a .tftpl file"
+  type        = string
+}
+
+variable "assignment_parameters" {
+  description = "JSON-encoded parameters for the policy assignment"
+  type        = string
+  default     = null
 }
 
 variable "enforcement_mode" {

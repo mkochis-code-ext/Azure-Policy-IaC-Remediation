@@ -104,39 +104,50 @@ In summary, aligning Azure Policy with standards like NIST 800-53, HIPAA, and HI
     *   `azurerm_policy_assignment` (or scope-specific variants like `azurerm_subscription_policy_assignment`, `azurerm_resource_group_policy_assignment`) – to assign a policy or initiative at a given scope. [learn.microsoft.com](https://learn.microsoft.com/en-us/azure/governance/policy/assign-policy-terraform)
     *   `azurerm_policy_remediation` – to create a remediation task (discussed in the next section). [techcommunity.microsoft.com](https://techcommunity.microsoft.com/blog/azurepaasblog/implementing-azure-policy-using-terraform/1423775)
 *   **Write Terraform Configurations**: In your Terraform code, define the above resources to represent the desired state of Azure Policy:
-    *   *Policy Definition Example*: Define a policy that audits untagged resource groups:
+    *   *Policy Definition Example*: Define a policy that audits untagged resource groups. Store the policy rule JSON in an external `.tftpl` template file (e.g., `policy_content/require_env_tag.tftpl`) and render it with `templatefile()`:
+
+        **Template file** (`policy_content/require_env_tag.tftpl`):
+        ```json
+        {
+          "if": {
+            "field": "type",
+            "equals": "Microsoft.Resources/subscriptions/resourceGroups"
+          },
+          "then": {
+            "effect": "${effect}",
+            "condition": {
+              "field": "[concat('tags[', parameters('tagName'), ']')]",
+              "exists": "false"
+            }
+          }
+        }
+        ```
+
+        **Terraform resource**:
         ```hcl
         resource "azurerm_policy_definition" "require_tag" {
           name         = "requireEnvTag"
           policy_type  = "Custom"
-          mode         = "All"
+          mode         = "Indexed"
           display_name = "Require Environment Tag on RGs"
-          policy_rule  = <<POLICY
-            {
-              "if": {
-                "field": "type",
-                "equals": "Microsoft.Resources/subscriptions/resourceGroups"
-              },
-              "then": {
-                "effect": "Audit",
-                "condition": {
-                  "field": "[concat('tags[', parameters('tagName'), ']')]",
-                  "exists": "false"
-                }
+
+          ## Use this structure with external .tftpl files for policy definitions.
+          policy_rule = templatefile("${path.module}/../policy_content/require_env_tag.tftpl", {
+            effect = "Audit"
+          })
+
+          parameters = jsonencode({
+            tagName = {
+              type = "String"
+              metadata = {
+                description = "Name of the required tag"
+                displayName = "Tag Name"
               }
             }
-          POLICY
-          parameters = <<PARAMS
-            {
-              "tagName": {
-                "type": "String",
-                "metadata": { "description": "Name of the required tag", "displayName": "Tag Name" }
-              }
-            }
-          PARAMS
+          })
         }
         ```
-        *(In practice, you may not need to create a custom definition if a built-in covers your requirement. The above is illustrative.)*
+        *(In practice, you may not need to create a custom definition if a built-in covers your requirement. The above is illustrative. Using external `.tftpl` files keeps policy rule JSON separate from Terraform HCL, making definitions easier to read, test, and reuse across modules.)*
     *   *Policy Assignment Example*: Assign the above policy at subscription scope using Terraform:
         ```hcl
         resource "azurerm_subscription_policy_assignment" "require_tag_assign" {
