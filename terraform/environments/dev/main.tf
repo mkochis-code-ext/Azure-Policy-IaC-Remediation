@@ -9,6 +9,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
+    azapi = {
+      source  = "azure/azapi"
+      version = "~> 1.0"
+    }
   }
 }
 
@@ -46,4 +50,5 @@ module "project" {
   location                     = var.location
   data_location                = var.data_location
   policy_enforcement_disabled  = var.policy_enforcement_disabled
+  alert_email_addresses        = var.alert_email_addresses
 }

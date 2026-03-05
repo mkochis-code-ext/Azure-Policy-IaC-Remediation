@@ -37,3 +37,8 @@ variable "policy_enforcement_disabled" {
   type        = bool
   default     = false
 }
+
+variable "alert_email_addresses" {
+  description = "List of email addresses to receive policy compliance alerts"
+  type        = list(string)
+}
